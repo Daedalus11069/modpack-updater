@@ -4,7 +4,7 @@ import { promiseTimeout, useFileDialog } from '@vueuse/core'
 import { Conf } from 'electron-conf/renderer'
 import { BlobReader, Entry, TextWriter, ZipReader } from '@zip.js/zip.js'
 import { FwbButton, FwbNavbar, FwbNavbarCollapse } from 'flowbite-vue'
-import { CurseforgeV1Client } from '@xmcl/curseforge'
+import { CurseforgeV1Client, File } from '@xmcl/curseforge'
 import Tree from 'primevue/tree'
 import { TreeNode } from 'primevue/treenode'
 import ProgressBar from 'primevue/progressbar'
@@ -16,7 +16,7 @@ import type { AppSettings } from 'src/shared/types'
 interface UpdateFile {
   name: string
   filename: string
-  newFilename?: string
+  oldFilename?: string
   addonID: number
   fileID: number
   changelog?: string
@@ -36,7 +36,6 @@ interface ManifestData {
   files: ManifestFile[]
 }
 
-const writer = new TextWriter()
 const conf = new Conf<AppSettings>()
 const modpackFilename = ref<string>('')
 const modpackTree = ref<TreeNode[]>([])
@@ -50,12 +49,15 @@ const updateData = ref<UpdateData>({
 const updateDataState = reactive({
   loading: {
     started: false,
+    running: false,
     finished: false,
     canceled: false
   }
 })
 
 const buttonsDisabled = ref<boolean>(true)
+
+const abortController = ref<AbortController>(new AbortController())
 
 const { open, onChange } = useFileDialog({
   accept: 'zip/*' // Set to accept only zip files
@@ -112,48 +114,50 @@ const update = () => {
   console.log(modpackTree.value)
 }
 
+async function manifestFileGetter(files: ManifestFile[] = [], signal: AbortSignal) {
+  const fileIDs = files.map(({ fileID }) => fileID)
+  files = ((await api.value!.getFiles(fileIDs, signal)) as unknown as ManifestFile[]).map(
+    (addon) => {
+      const { id, modId, fileName } = addon as unknown as File
+      addon.projectID = modId
+      addon.fileID = id
+      // @ts-expect-error
+      addon.filename = fileName
+      return addon
+    }
+  )
+  const modIDs = files.map(({ projectID }) => projectID)
+  const mods = await api.value!.getMods(modIDs, signal)
+  const updateFiles: UpdateFile[] = files.map((addon) => {
+    const nameIdx = mods.findIndex((mod) => mod.id === addon.projectID)
+    let name = ''
+    if (nameIdx >= 0) {
+      name = mods[nameIdx].name
+    }
+    return {
+      name,
+      addonID: addon.projectID,
+      fileID: addon.fileID,
+      // @ts-expect-error
+      filename: addon.filename
+    }
+  })
+  return updateFiles
+}
+
 const cacheUpdateData = async (refresh = false) => {
+  progress.value = 0
   const manifestIdx = modpackTree.value.findIndex((node) => node.label === 'manifest.json')
   if (manifestIdx >= 0) {
     const entry = modpackTree.value[manifestIdx].entry
     const manifest: ManifestData | UpdateData = refresh
-      ? JSON.parse(await entry.getData(writer))
+      ? JSON.parse(await entry.getData(new TextWriter()))
       : updateData.value
-    let idx = 0
     let files: (UpdateFile | ManifestFile)[] = manifest.files
-    progress.value = 0
-    if (typeof api.value?.getMod !== 'undefined') {
-      let breaker = 0
-      for await (const file of files as ManifestFile[]) {
-        const { projectID, fileID } = file
-        if (typeof (file as unknown as UpdateFile).name === 'undefined') {
-          const { name } = await api.value.getMod(projectID)
-          const { fileName } = await api.value.getModFile(projectID, fileID)
-          // const changelog = await api.value.getModFileChangelog(projectID, fileID)
-          files.push({
-            name,
-            filename: fileName,
-            addonID: projectID,
-            fileID
-          })
-          progress.value = Math.trunc(((idx + 1) / manifest.files.length) * 100)
-          console.log(updateDataState.loading.canceled)
-          if (updateDataState.loading.canceled) {
-            break
-          }
-          breaker++
-          if (breaker > 10) {
-            breaker = 0
-            await promiseTimeout(2000)
-          }
-        }
-      }
+    if (typeof api.value?.getMods !== 'undefined' && typeof api.value?.getFiles !== 'undefined') {
+      files = await manifestFileGetter(files as ManifestFile[], abortController.value.signal)
     }
-    Object.assign(updateData.value, manifest)
-    if (idx === manifest.files.length - 1) {
-      updateDataState.loading.started = false
-      updateDataState.loading.finished = true
-    }
+    updateData.value.files = files as UpdateFile[]
     promiseTimeout(600).then(() => {
       progress.value = 0
     })
@@ -185,14 +189,19 @@ const viewChangelogs = async () => {
       )
       .sort((a, b) => a.name.localeCompare(b.name))
 
+    console.log({ installedAddons, updateAddons })
+
     const changedAddons = updateAddons
       .filter(
         (addon) =>
-          !installedAddons.some((newAddon) => {
-            if (addon.fileID !== newAddon.fileID) {
-              addon.newFilename = newAddon.filename
+          !installedAddons.some((installedAddon) => {
+            if (
+              addon.addonID === installedAddon.addonID &&
+              addon.fileID !== installedAddon.fileID
+            ) {
+              addon.oldFilename = installedAddon.filename
             }
-            return addon.fileID === newAddon.fileID
+            return addon.fileID === installedAddon.fileID
           })
       )
       .filter((addon) => !newAddons.some((newAddon) => addon.addonID === newAddon.addonID))
@@ -223,10 +232,21 @@ const dataLoadingState = computed<{ state: 'Cancel' | 'Resume'; color: 'red' | '
 })
 
 const controlLoading = () => {
-  updateDataState.loading.canceled = !updateDataState.loading.canceled
-  if (updateDataState.loading.started && updateDataState.loading.canceled) {
+  if (!updateDataState.loading.canceled && updateDataState.loading.running) {
+    updateDataState.loading.canceled = true
+    updateDataState.loading.running = false
+    abortController.value.abort('Canceled')
+  } else if (
+    updateDataState.loading.started &&
+    updateDataState.loading.canceled &&
+    !updateDataState.loading.running
+  ) {
+    abortController.value = new AbortController()
+    updateDataState.loading.running = true
     updateDataState.loading.canceled = false
-    cacheUpdateData()
+    // cacheUpdateData()
+  } else {
+    abortController.value = new AbortController()
   }
 }
 
@@ -236,7 +256,11 @@ onChange(async (files) => {
     const zipFileReader = new ZipReader(new BlobReader(file))
     modpackFilename.value = file.name
     modpackTree.value = await buildTreeFromPaths(zipFileReader.getEntriesGenerator())
-    updateDataState.loading.started = true
+    // abortController.value = new AbortController()
+    // updateDataState.loading.started = true
+    // updateDataState.loading.running = true
+    // updateDataState.loading.canceled = false
+    // updateDataState.loading.finished = false
     cacheUpdateData(true).then(() => {
       buttonsDisabled.value = false
     })
