@@ -1,0 +1,13 @@
+diff --git a/node_modules/@vueuse/electron/index.mjs b/node_modules/@vueuse/electron/index.mjs
+index dfd638e..5f82639 100644
+--- a/node_modules/@vueuse/electron/index.mjs
++++ b/node_modules/@vueuse/electron/index.mjs
+@@ -47,7 +47,7 @@ function setSendSync(ipcRenderer) {
+   };
+ }
+ function useIpcRenderer(ipcRenderer) {
+-  if (!ipcRenderer)
++  if (!ipcRenderer && typeof window.require !== 'undefined')
+     ipcRenderer = window == null ? void 0 : window.require("electron").ipcRenderer;
+   if (!ipcRenderer)
+     throw new Error("provide IpcRenderer module or enable nodeIntegration");
