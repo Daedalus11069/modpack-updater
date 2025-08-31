@@ -20,6 +20,8 @@ interface UpdateFile {
   addonID: number
   fileID: number
   changelog?: string
+  downloadUrl?: string
+  required: boolean
 }
 
 interface UpdateData {
@@ -115,20 +117,25 @@ const update = () => {
 }
 
 async function manifestFileGetter(files: ManifestFile[] = [], signal: AbortSignal) {
-  const fileIDs = files.map(({ fileID }) => fileID)
-  files = ((await api.value!.getFiles(fileIDs, signal)) as unknown as ManifestFile[]).map(
-    (addon) => {
-      const { id, modId, fileName } = addon as unknown as File
-      addon.projectID = modId
-      addon.fileID = id
-      // @ts-expect-error
-      addon.filename = fileName
-      return addon
-    }
-  )
-  const modIDs = files.map(({ projectID }) => projectID)
+  const requiredMap: Record<string, boolean> = {}
+  const fileIDs = files.map(({ fileID, required }) => {
+    requiredMap[`${fileID}`] = required
+    return fileID
+  })
+  const fetchedFiles = (
+    (await api.value!.getFiles(fileIDs, signal)) as unknown as ManifestFile[]
+  ).map((addon) => {
+    const { id, modId, fileName } = addon as unknown as File
+    addon.projectID = modId
+    addon.fileID = id
+    // @ts-expect-error
+    addon.filename = fileName
+    addon.required = requiredMap[`${id}`]
+    return addon
+  })
+  const modIDs = fetchedFiles.map(({ projectID }) => projectID)
   const mods = await api.value!.getMods(modIDs, signal)
-  const updateFiles: UpdateFile[] = files.map((addon) => {
+  const updateFiles: UpdateFile[] = fetchedFiles.map((addon) => {
     const nameIdx = mods.findIndex((mod) => mod.id === addon.projectID)
     let name = ''
     if (nameIdx >= 0) {
@@ -139,7 +146,12 @@ async function manifestFileGetter(files: ManifestFile[] = [], signal: AbortSigna
       addonID: addon.projectID,
       fileID: addon.fileID,
       // @ts-expect-error
-      filename: addon.filename
+      filename: addon.filename,
+      downloadUrl: `${(addon as unknown as File).downloadUrl}`.replace(
+        /^https:\/\/edge\./,
+        'https://mediafiles.'
+      ),
+      required: addon.required
     }
   })
   return updateFiles
@@ -179,7 +191,9 @@ const viewChangelogs = async () => {
         name: file.name,
         addonID: file.addonID,
         fileID: file.fileID,
-        filename: file.filename
+        filename: file.filename,
+        downloadUrl: file.downloadUrl,
+        required: file.required
       }))
       .filter(({ name }) => name)
 
@@ -188,8 +202,6 @@ const viewChangelogs = async () => {
         (addon) => !installedAddons.some((currentAddon) => currentAddon.addonID === addon.addonID)
       )
       .sort((a, b) => a.name.localeCompare(b.name))
-
-    console.log({ installedAddons, updateAddons })
 
     const changedAddons = updateAddons
       .filter(
@@ -208,13 +220,19 @@ const viewChangelogs = async () => {
       .sort((a, b) => a.name.localeCompare(b.name))
 
     const removedAddons = installedAddons
-      .filter((addon) => !updateAddons.some((newAddon) => newAddon.addonID === addon.addonID))
+      .filter(
+        (addon) => !updateAddons.some((updatedAddon) => updatedAddon.addonID === addon.addonID)
+      )
       .filter(
         (addon) => !changedAddons.some((changedAddon) => addon.fileID === changedAddon.fileID)
       )
       .sort((a, b) => a.name.localeCompare(b.name))
 
-    console.log({ newAddons, changedAddons, removedAddons })
+    const disabledAddons = updateAddons
+      .filter((addon) => addon.required === false)
+      .sort((a, b) => a.name.localeCompare(b.name))
+
+    console.log({ newAddons, changedAddons, removedAddons, disabledAddons })
   }
 }
 
