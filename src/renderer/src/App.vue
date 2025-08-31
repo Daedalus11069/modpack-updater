@@ -6,7 +6,6 @@ import { BlobReader, Entry, TextWriter, ZipReader } from '@zip.js/zip.js'
 import { FwbButton, FwbNavbar, FwbNavbarCollapse, FwbSpinner } from 'flowbite-vue'
 import { CurseforgeV1Client, File } from '@xmcl/curseforge'
 import Tree from 'primevue/tree'
-import { TreeNode } from 'primevue/treenode'
 import ProgressBar from 'primevue/progressbar'
 import Accordion from 'primevue/accordion'
 import AccordionPanel from 'primevue/accordionpanel'
@@ -16,18 +15,7 @@ import { marked } from 'marked'
 import ThemeToggler from './components/ThemeToggler.vue'
 import InstanceChooser from './components/InstanceChooser.vue'
 import APIKey from './components/APIKey.vue'
-import type { AppSettings } from 'src/shared/types'
-
-interface UpdateFile {
-  name: string
-  filename: string
-  oldFilename?: string
-  addonID: number
-  fileID: number
-  changelog?: string
-  downloadUrl?: string
-  required: boolean
-}
+import type { AppSettings, FlattenedEntry, TreeNodeEntry, UpdateFile } from 'src/shared/types'
 
 interface UpdateData {
   files: UpdateFile[]
@@ -45,7 +33,8 @@ interface ManifestData {
 
 const conf = new Conf<AppSettings>()
 const modpackFilename = ref<string>('')
-const modpackTree = ref<TreeNode[]>([])
+const modpackPaths = ref<Entry[]>([])
+const modpackTree = ref<TreeNodeEntry[]>([])
 const progress = ref<number>(0)
 const progressText = ref<string>('')
 const api = ref<CurseforgeV1Client>()
@@ -115,12 +104,12 @@ const { open, onChange } = useFileDialog({
   accept: 'zip/*' // Set to accept only zip files
 })
 
-async function buildTreeFromPaths(paths: AsyncGenerator<Entry, boolean>): Promise<TreeNode[]> {
-  const tree: TreeNode[] = []
+async function buildTreeFromPaths(paths: Entry[]): Promise<TreeNodeEntry[]> {
+  const tree: TreeNodeEntry[] = []
   const nodeMap = new Map()
 
   for await (const path of paths) {
-    let currentNodeArray: TreeNode[] = tree
+    let currentNodeArray: TreeNodeEntry[] = tree
     let currentPath = ''
 
     const segments = path.filename.split('/')
@@ -162,29 +151,100 @@ async function buildTreeFromPaths(paths: AsyncGenerator<Entry, boolean>): Promis
   return tree
 }
 
-const countTreeLeafs = (node, count = 0) => {
-  if (node.children !== null) {
+const flattenTree = (node: TreeNodeEntry): FlattenedEntry[] => {
+  const flattened: FlattenedEntry[] = []
+
+  function recurse(nodeList) {
+    if (!nodeList) {
+      return
+    }
+    nodeList.forEach((node) => {
+      // Create a shallow copy of the node to avoid mutating the original data.
+      const nodeCopy = { ...node }
+
+      // Remove the children property to ensure the node is flat.
+      delete nodeCopy.children
+      flattened.push(nodeCopy)
+
+      // Recurse on the children.
+      if (node.children) {
+        recurse(node.children)
+      }
+    })
+  }
+
+  if (typeof node.children !== 'undefined') {
+    recurse(node.children)
+  }
+  return flattened
+}
+
+const getTreeContent = async (node: TreeNodeEntry) => {
+  if (typeof node.children !== 'undefined' && node.children !== null) {
     for (const treeNode of node.children) {
       if (treeNode.children !== null) {
-        count = countTreeLeafs(treeNode, count)
-      } else if (treeNode.isFile) {
-        count++
+        await getTreeContent(treeNode)
+      } else if (
+        treeNode.isFile &&
+        typeof treeNode.entry !== 'undefined' &&
+        typeof treeNode.entry.getData !== 'undefined'
+      ) {
+        treeNode.content = await treeNode.entry.getData(new TextWriter())
       }
     }
   }
-  if (node.isFile) {
-    count++
+  if (
+    node.isFile &&
+    typeof node.entry !== 'undefined' &&
+    typeof node.entry.getData !== 'undefined'
+  ) {
+    node.content = await node.entry.getData(new TextWriter())
   }
+  return node
+}
+
+const countFiles = (nodes: Entry[]) => {
+  let count = 0
+  for (const node of nodes) {
+    if (!node.directory) {
+      count++
+    }
+  }
+  // if (typeof node.children !== 'undefined' && node.children !== null) {
+  //   for (const treeNode of node.children) {
+  //     if (treeNode.children !== null) {
+  //       count = countTreeLeafs(treeNode, count)
+  //     } else if (treeNode.isFile) {
+  //       count++
+  //     }
+  //   }
+  // }
+  // if (node.isFile) {
+  //   count++
+  // }
   return count
 }
 
-const updateModpack = () => {
-  console.log(modpackTree.value, modpackUpdate.value)
+const updateModpack = async () => {
+  console.log(modpackPaths.value, modpackTree.value, modpackUpdate.value)
   const overridesIdx = modpackTree.value.findIndex((node) => node.key === 'overrides')
-  if (overridesIdx >= 0 && modpackTree.value[overridesIdx].children !== null) {
-    const overrides = modpackTree.value[overridesIdx]
-    let overridesTotal = countTreeLeafs(overrides)
-    console.log(overridesTotal)
+  if (
+    overridesIdx >= 0 &&
+    typeof modpackTree.value[overridesIdx] !== 'undefined' &&
+    modpackTree.value[overridesIdx] !== null
+  ) {
+    let overridesTotal = countFiles(
+      modpackPaths.value.filter((node) => /^overrides\//.test(node.filename))
+    )
+    const overrides = await getTreeContent(modpackTree.value[overridesIdx])
+    const overridesFlattened = flattenTree(overrides).filter((node) => node.isFile)
+    console.log({ overridesTotal, overridesFlattened })
+    // buttonsDisabled.value = true
+    // window.electron.ipcRenderer.send('update-modpack', {
+    //   overrides,
+    //   overridesTotal,
+    //   ...modpackUpdate.value
+    // })
   }
 }
 
@@ -234,17 +294,19 @@ const cacheUpdateData = async (refresh = false) => {
   const manifestIdx = modpackTree.value.findIndex((node) => node.label === 'manifest.json')
   if (manifestIdx >= 0) {
     const entry = modpackTree.value[manifestIdx].entry
-    const manifest: ManifestData | UpdateData = refresh
-      ? JSON.parse(await entry.getData(new TextWriter()))
-      : updateData.value
-    let files: (UpdateFile | ManifestFile)[] = manifest.files
-    if (typeof api.value?.getMods !== 'undefined' && typeof api.value?.getFiles !== 'undefined') {
-      files = await manifestFileGetter(files as ManifestFile[], abortController.value.signal)
+    if (typeof entry.getData !== 'undefined') {
+      const manifest: ManifestData | UpdateData = refresh
+        ? JSON.parse(await entry.getData(new TextWriter()))
+        : updateData.value
+      let files: (UpdateFile | ManifestFile)[] = manifest.files
+      if (typeof api.value?.getMods !== 'undefined' && typeof api.value?.getFiles !== 'undefined') {
+        files = await manifestFileGetter(files as ManifestFile[], abortController.value.signal)
+      }
+      updateData.value.files = files as UpdateFile[]
+      promiseTimeout(600).then(() => {
+        progress.value = 0
+      })
     }
-    updateData.value.files = files as UpdateFile[]
-    promiseTimeout(600).then(() => {
-      progress.value = 0
-    })
   }
 }
 
@@ -356,20 +418,23 @@ const controlLoading = () => {
 
 onChange(async (files) => {
   if (files !== null) {
-    spinnerVisible.value = true
     const file = files[0]
-    const zipFileReader = new ZipReader(new BlobReader(file))
-    modpackFilename.value = file.name
-    modpackTree.value = await buildTreeFromPaths(zipFileReader.getEntriesGenerator())
-    // abortController.value = new AbortController()
-    // updateDataState.loading.started = true
-    // updateDataState.loading.running = true
-    // updateDataState.loading.canceled = false
-    // updateDataState.loading.finished = false
-    await cacheUpdateData(true)
-    await processModpackChanges()
-    buttonsDisabled.value = false
-    spinnerVisible.value = false
+    if (typeof file !== 'undefined' && file !== null) {
+      spinnerVisible.value = true
+      const zipFileReader = new ZipReader(new BlobReader(file))
+      modpackFilename.value = file.name
+      modpackPaths.value = await zipFileReader.getEntries()
+      modpackTree.value = await buildTreeFromPaths(modpackPaths.value)
+      // abortController.value = new AbortController()
+      // updateDataState.loading.started = true
+      // updateDataState.loading.running = true
+      // updateDataState.loading.canceled = false
+      // updateDataState.loading.finished = false
+      await cacheUpdateData(true)
+      await processModpackChanges()
+      buttonsDisabled.value = false
+      spinnerVisible.value = false
+    }
   }
 })
 

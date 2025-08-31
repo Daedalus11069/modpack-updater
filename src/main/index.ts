@@ -3,7 +3,8 @@ import { readFile } from 'fs/promises'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { Conf, type JSONSchema } from 'electron-conf/main'
-import { AppSettings, PositionSetting } from './../shared/types'
+import { writeFile } from 'write-file-safe'
+import { AppSettings, PositionSetting, UpdateModpackData } from './../shared/types'
 import icon from '../../resources/icon.png?asset'
 
 const schema: JSONSchema<AppSettings> = {
@@ -130,6 +131,19 @@ app.whenReady().then(() => {
       )
     }
     throw new Error('No Instance Defined')
+  })
+
+  ipcMain.on('update-modpack', (evt, data: UpdateModpackData) => {
+    const { overrides, overridesTotal, newAddons, changedAddons, disabledAddons, removedAddons } =
+      data
+    const totalItems =
+      overridesTotal +
+      newAddons.length +
+      changedAddons.length +
+      disabledAddons.length +
+      removedAddons.length
+
+    // writeFile
   })
 
   app.on('activate', function () {
