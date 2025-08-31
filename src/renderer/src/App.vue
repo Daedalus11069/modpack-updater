@@ -1,13 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { promiseTimeout, useFileDialog } from '@vueuse/core'
+import { computed, onMounted, reactive, ref, useTemplateRef, watch } from 'vue'
+import { promiseTimeout, useElementSize, useFileDialog, useWindowSize } from '@vueuse/core'
 import { Conf } from 'electron-conf/renderer'
 import { BlobReader, Entry, TextWriter, ZipReader } from '@zip.js/zip.js'
-import { FwbButton, FwbNavbar, FwbNavbarCollapse } from 'flowbite-vue'
+import { FwbButton, FwbNavbar, FwbNavbarCollapse, FwbSpinner } from 'flowbite-vue'
 import { CurseforgeV1Client, File } from '@xmcl/curseforge'
 import Tree from 'primevue/tree'
 import { TreeNode } from 'primevue/treenode'
 import ProgressBar from 'primevue/progressbar'
+import Accordion from 'primevue/accordion'
+import AccordionPanel from 'primevue/accordionpanel'
+import AccordionHeader from 'primevue/accordionheader'
+import AccordionContent from 'primevue/accordioncontent'
+import { marked } from 'marked'
 import ThemeToggler from './components/ThemeToggler.vue'
 import InstanceChooser from './components/InstanceChooser.vue'
 import APIKey from './components/APIKey.vue'
@@ -46,6 +51,51 @@ const progressText = ref<string>('')
 const api = ref<CurseforgeV1Client>()
 const updateData = ref<UpdateData>({
   files: []
+})
+const modpackUpdate = ref<{
+  newAddons: UpdateFile[]
+  changedAddons: UpdateFile[]
+  removedAddons: UpdateFile[]
+  disabledAddons: UpdateFile[]
+}>({ newAddons: [], changedAddons: [], removedAddons: [], disabledAddons: [] })
+const spinnerVisible = ref<boolean>()
+
+const mainArea = useTemplateRef('mainArea')
+const navArea = useTemplateRef('navArea')
+const configArea = useTemplateRef('configArea')
+const bottomArea = useTemplateRef('bottomArea')
+const bottomAreaContainer = useTemplateRef('bottomAreaContainer')
+const changelogsHeader = useTemplateRef('changelogsHeader')
+
+const windowSize = useWindowSize({
+  type: 'visual'
+})
+const navAreaSize = useElementSize(
+  navArea,
+  { width: 0, height: 0 },
+  {
+    box: 'border-box'
+  }
+)
+const configAreaSize = useElementSize(
+  configArea,
+  { width: 0, height: 0 },
+  {
+    box: 'border-box'
+  }
+)
+const changelogsHeaderSize = useElementSize(changelogsHeader)
+
+const bottomAreaheight = computed(() => {
+  const size =
+    windowSize.height.value -
+    parseFloat(getComputedStyle(mainArea.value!).paddingTop.replace('px', '')) * 2 -
+    navAreaSize.height.value -
+    configAreaSize.height.value -
+    parseFloat(getComputedStyle(bottomArea.value!).marginTop.replace('px', '')) -
+    parseFloat(getComputedStyle(bottomAreaContainer.value!).marginTop.replace('px', '')) -
+    changelogsHeaderSize.height.value
+  return size + 'px'
 })
 
 const updateDataState = reactive({
@@ -112,8 +162,30 @@ async function buildTreeFromPaths(paths: AsyncGenerator<Entry, boolean>): Promis
   return tree
 }
 
-const update = () => {
-  console.log(modpackTree.value)
+const countTreeLeafs = (node, count = 0) => {
+  if (node.children !== null) {
+    for (const treeNode of node.children) {
+      if (treeNode.children !== null) {
+        count = countTreeLeafs(treeNode, count)
+      } else if (treeNode.isFile) {
+        count++
+      }
+    }
+  }
+  if (node.isFile) {
+    count++
+  }
+  return count
+}
+
+const updateModpack = () => {
+  console.log(modpackTree.value, modpackUpdate.value)
+  const overridesIdx = modpackTree.value.findIndex((node) => node.key === 'overrides')
+  if (overridesIdx >= 0 && modpackTree.value[overridesIdx].children !== null) {
+    const overrides = modpackTree.value[overridesIdx]
+    let overridesTotal = countTreeLeafs(overrides)
+    console.log(overridesTotal)
+  }
 }
 
 async function manifestFileGetter(files: ManifestFile[] = [], signal: AbortSignal) {
@@ -176,7 +248,7 @@ const cacheUpdateData = async (refresh = false) => {
   }
 }
 
-const viewChangelogs = async () => {
+const processModpackChanges = async () => {
   const instanceJson = await window.electron.ipcRenderer.invoke('get-instance-json')
   const installedAddons = instanceJson.installedAddons.map((addon) => ({
     name: addon.name,
@@ -232,7 +304,21 @@ const viewChangelogs = async () => {
       .filter((addon) => addon.required === false)
       .sort((a, b) => a.name.localeCompare(b.name))
 
-    console.log({ newAddons, changedAddons, removedAddons, disabledAddons })
+    for await (const addon of changedAddons) {
+      if (typeof api.value?.getModFileChangelog !== 'undefined') {
+        const changelog = await api.value.getModFileChangelog(
+          addon.addonID,
+          addon.fileID,
+          abortController.value.signal
+        )
+        addon.changelog = await marked.parse(changelog)
+      }
+    }
+
+    modpackUpdate.value.newAddons = newAddons
+    modpackUpdate.value.changedAddons = changedAddons
+    modpackUpdate.value.disabledAddons = disabledAddons
+    modpackUpdate.value.removedAddons = removedAddons
   }
 }
 
@@ -270,6 +356,7 @@ const controlLoading = () => {
 
 onChange(async (files) => {
   if (files !== null) {
+    spinnerVisible.value = true
     const file = files[0]
     const zipFileReader = new ZipReader(new BlobReader(file))
     modpackFilename.value = file.name
@@ -279,9 +366,10 @@ onChange(async (files) => {
     // updateDataState.loading.running = true
     // updateDataState.loading.canceled = false
     // updateDataState.loading.finished = false
-    cacheUpdateData(true).then(() => {
-      buttonsDisabled.value = false
-    })
+    await cacheUpdateData(true)
+    await processModpackChanges()
+    buttonsDisabled.value = false
+    spinnerVisible.value = false
   }
 })
 
@@ -299,7 +387,7 @@ onMounted(async () => {
 
 <template>
   <div class="h-full flex flex-col">
-    <fwb-navbar solid>
+    <fwb-navbar solid ref="navArea">
       <template #logo> Modpack Updater </template>
       <template #default="{ isShowMenu }">
         <fwb-navbar-collapse :is-show-menu="isShowMenu"> </fwb-navbar-collapse>
@@ -308,22 +396,30 @@ onMounted(async () => {
         <theme-toggler />
       </template>
     </fwb-navbar>
-    <div class="flex flex-col bg-white dark:bg-gray-700 dark:text-white grow p-4">
-      <div class="basis-auto">
+    <div
+      class="flex flex-col bg-white dark:bg-gray-700 dark:text-white grow p-4 h-full"
+      ref="mainArea"
+    >
+      <div ref="configArea">
         <APIKey class="mb-3" type="password" />
         <InstanceChooser />
       </div>
-      <div class="grow">
-        <div class="flex gap-3">
-          <div class="basis-4/12">
+      <div class="grow flex flex-col h-full" ref="bottomArea">
+        <div class="flex gap-3 grow h-full mt-3" ref="bottomAreaContainer">
+          <div id="mod-filetree-area" class="basis-4/12 flex flex-col h-full">
             <div class="flex justify-between">
-              <fwb-button class="my-3" @click="open">Choose Modpack</fwb-button>
+              <fwb-button class="mb-3" @click="open">
+                Choose Modpack
+                <template #suffix>
+                  <fwb-spinner color="white" v-if="spinnerVisible" />
+                </template>
+              </fwb-button>
               <div class="flex items-center justify-center" v-if="modpackFilename">
                 <strong class="me-2"> Active: </strong>
                 {{ modpackFilename }}
               </div>
             </div>
-            <div class="flex">
+            <!-- <div class="flex">
               <fwb-button
                 class="mb-3"
                 :color="dataLoadingState.color"
@@ -332,24 +428,30 @@ onMounted(async () => {
               >
                 {{ dataLoadingState.state }} Load
               </fwb-button>
-            </div>
-            <Tree :value="modpackTree" class="w-full"></Tree>
+            </div> -->
+            <Tree :value="modpackTree" :class="`w-full overflow-y-auto`"></Tree>
           </div>
-          <div class="basis-8/12">
-            <div class="flex">
-              <div class="basis-1/2">
-                <fwb-button class="my-3" @click="viewChangelogs" :disabled="buttonsDisabled">
-                  View Changelogs
-                </fwb-button>
-              </div>
-              <div class="basis-1/2 flex justify-end">
-                <fwb-button class="my-3" @click="update" :disabled="buttonsDisabled">
-                  Update Modpack
-                </fwb-button>
-              </div>
+          <div id="mod-update-area" class="basis-4/12 h-full">
+            <h3 ref="changelogsHeader">Changelogs:</h3>
+            <div :class="`basis-1/2 h-full overflow-y-auto`">
+              <Accordion>
+                <AccordionPanel :value="addon.addonID" v-for="addon in modpackUpdate.changedAddons">
+                  <AccordionHeader>{{ addon.name }}</AccordionHeader>
+                  <AccordionContent>
+                    <p class="m-0 prose dark:prose-invert" v-html="addon.changelog"></p>
+                  </AccordionContent>
+                </AccordionPanel>
+              </Accordion>
             </div>
-            <div>
-              <ProgressBar :value="progress">{{ progress }}% {{ progressText }}</ProgressBar>
+          </div>
+          <div class="basis-4/12">
+            <div class="flex items-center gap-3">
+              <fwb-button @click="updateModpack" :disabled="buttonsDisabled">
+                Update Modpack
+              </fwb-button>
+              <ProgressBar class="grow" :value="progress">
+                {{ progress }}% {{ progressText }}
+              </ProgressBar>
             </div>
           </div>
         </div>
@@ -357,3 +459,14 @@ onMounted(async () => {
     </div>
   </div>
 </template>
+
+<style>
+#mod-filetree-area,
+#mod-update-area {
+  --max-h: v-bind('bottomAreaheight');
+  @apply max-h-(--max-h);
+}
+.prose h1 {
+  font-size: 1.25em;
+}
+</style>
