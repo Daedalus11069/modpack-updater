@@ -235,7 +235,7 @@ const updateModpack = async () => {
       .filter((node) => node.isFile)
       .map((node) => ({
         content: node.content,
-        key: node.filename
+        key: node.key
       }))
     progress.value = 0
     buttonsDisabled.value = true
