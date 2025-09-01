@@ -146,62 +146,69 @@ app.whenReady().then(() => {
       changedAddons.length +
       disabledAddons.length +
       removedAddons.length
+    const instanceLocation = store.get('instanceLocation')
 
-    let idx = 0
-    for await (const newAddon of newAddons) {
-      if (typeof newAddon.downloadUrl !== 'undefined') {
-        const downloader = await downloadFile({
-          url: newAddon.downloadUrl!,
-          directory: join(store.get('instanceLocation'), 'mods'), // or 'savePath' for full path
-          cliProgress: false, // Show progress bar in the CLI (default: false)
-          parallelStreams: 1 // Number of parallel connections (default: 3)
-        })
-        await downloader.download()
-        evt.sender.send('update-modpack-progress', (idx++ / totalItems) * 100)
-      }
-    }
-
-    for await (const changedAddon of changedAddons) {
-      if (
-        typeof changedAddon.downloadUrl !== 'undefined' &&
-        typeof changedAddon.oldFilename !== 'undefined'
-      ) {
-        await unlink(join(store.get('instanceLocation'), 'mods', changedAddon.oldFilename!))
-        const downloader = await downloadFile({
-          url: changedAddon.downloadUrl!,
-          directory: join(store.get('instanceLocation'), 'mods'), // or 'savePath' for full path
-          fileName: changedAddon.filename,
-          cliProgress: false, // Show progress bar in the CLI (default: false)
-          parallelStreams: 1 // Number of parallel connections (default: 3)
-        })
-        await downloader.download()
-        evt.sender.send('update-modpack-progress', (idx++ / totalItems) * 100)
-      }
-    }
-
-    for await (const disabledAddon of disabledAddons) {
-      await rename(
-        join(store.get('instanceLocation'), 'mods', disabledAddon.filename),
-        join(store.get('instanceLocation'), 'mods', disabledAddon.filename + '.disabled')
-      )
-      evt.sender.send('update-modpack-progress', (idx++ / totalItems) * 100)
-    }
-
-    for await (const removedAddon of removedAddons) {
-      await unlink(join(store.get('instanceLocation'), 'mods', removedAddon.filename))
-      evt.sender.send('update-modpack-progress', (idx++ / totalItems) * 100)
-    }
-
-    for await (const override of overrides) {
-      const successful = await writeFile(
-        join(store.get('instanceLocation'), override.key.replace(/^overrides\//i, '')),
-        override.content,
-        {
-          appendNewline: false
+    if (
+      typeof instanceLocation !== 'undefined' &&
+      instanceLocation !== null &&
+      instanceLocation !== ''
+    ) {
+      let idx = 0
+      for await (const newAddon of newAddons) {
+        if (typeof newAddon.downloadUrl !== 'undefined') {
+          const downloader = await downloadFile({
+            url: newAddon.downloadUrl!,
+            directory: join(instanceLocation, 'mods'), // or 'savePath' for full path
+            cliProgress: false, // Show progress bar in the CLI (default: false)
+            parallelStreams: 1 // Number of parallel connections (default: 3)
+          })
+          await downloader.download()
+          evt.sender.send('update-modpack-progress', (idx++ / totalItems) * 100)
         }
-      )
-      if (successful) {
+      }
+
+      for await (const changedAddon of changedAddons) {
+        if (
+          typeof changedAddon.downloadUrl !== 'undefined' &&
+          typeof changedAddon.oldFilename !== 'undefined'
+        ) {
+          await unlink(join(instanceLocation, 'mods', changedAddon.oldFilename!))
+          const downloader = await downloadFile({
+            url: changedAddon.downloadUrl!,
+            directory: join(instanceLocation, 'mods'), // or 'savePath' for full path
+            fileName: changedAddon.filename,
+            cliProgress: false, // Show progress bar in the CLI (default: false)
+            parallelStreams: 1 // Number of parallel connections (default: 3)
+          })
+          await downloader.download()
+          evt.sender.send('update-modpack-progress', (idx++ / totalItems) * 100)
+        }
+      }
+
+      for await (const disabledAddon of disabledAddons) {
+        await rename(
+          join(instanceLocation, 'mods', disabledAddon.filename),
+          join(instanceLocation, 'mods', disabledAddon.filename + '.disabled')
+        )
         evt.sender.send('update-modpack-progress', (idx++ / totalItems) * 100)
+      }
+
+      for await (const removedAddon of removedAddons) {
+        await unlink(join(instanceLocation, 'mods', removedAddon.filename))
+        evt.sender.send('update-modpack-progress', (idx++ / totalItems) * 100)
+      }
+
+      for await (const override of overrides) {
+        const successful = await writeFile(
+          join(instanceLocation, override.key.replace(/^overrides\//i, '')),
+          override.content,
+          {
+            appendNewline: false
+          }
+        )
+        if (successful) {
+          evt.sender.send('update-modpack-progress', (idx++ / totalItems) * 100)
+        }
       }
     }
   })
