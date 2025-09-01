@@ -519,7 +519,7 @@ onMounted(async () => {
               <Accordion>
                 <AccordionPanel
                   :value="addon.addonID"
-                  :style="`--p-accordion-header-color: var(--p-green-500);`"
+                  :style="`--p-accordion-header-color: var(--p-green-500); --p-accordion-header-hover-color: var(--p-green-300);`"
                   class="added-mod"
                   v-for="addon in modpackUpdate.newAddons"
                 >
@@ -527,7 +527,7 @@ onMounted(async () => {
                 </AccordionPanel>
                 <AccordionPanel
                   :value="addon.addonID"
-                  :style="`--p-accordion-header-color: var(--p-orange-500)`"
+                  :style="`--p-accordion-header-color: var(--p-orange-500); --p-accordion-header-hover-color: var(--p-orange-300);`"
                   v-for="addon in modpackUpdate.changedAddons"
                 >
                   <AccordionHeader>{{ addon.name }} (changed)</AccordionHeader>
@@ -537,7 +537,7 @@ onMounted(async () => {
                 </AccordionPanel>
                 <AccordionPanel
                   :value="addon.addonID"
-                  :style="`--p-accordion-header-color: var(--p-purple-500)`"
+                  :style="`--p-accordion-header-color: var(--p-purple-500); --p-accordion-header-hover-color: var(--p-purple-300);`"
                   class="disabled-mod"
                   v-for="addon in modpackUpdate.disabledAddons"
                 >
@@ -545,7 +545,7 @@ onMounted(async () => {
                 </AccordionPanel>
                 <AccordionPanel
                   :value="addon.addonID"
-                  :style="`--p-accordion-header-color: var(--p-red-500)`"
+                  :style="`--p-accordion-header-color: var(--p-red-500); --p-accordion-header-hover-color: var(--p-red-300);`"
                   class="removed-mod"
                   v-for="addon in modpackUpdate.removedAddons"
                 >
