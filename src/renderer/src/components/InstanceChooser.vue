@@ -31,7 +31,7 @@ onMounted(async () => {
 <template>
   <fwb-input v-model="instanceLocation">
     <template #suffix>
-      <fwb-button @click="chooseFolder">Select</fwb-button>
+      <fwb-button placeholder="Minecraft Instance Folder" @click="chooseFolder">Select</fwb-button>
     </template>
   </fwb-input>
 </template>
