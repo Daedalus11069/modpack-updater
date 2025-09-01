@@ -1,11 +1,12 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
-import { readFile } from 'fs/promises'
+import { readFile, rename, unlink } from 'fs/promises'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { Conf, type JSONSchema } from 'electron-conf/main'
 import { writeFile } from 'write-file-safe'
 import { AppSettings, PositionSetting, UpdateModpackData } from './../shared/types'
 import icon from '../../resources/icon.png?asset'
+import { downloadFile } from 'ipull'
 
 const schema: JSONSchema<AppSettings> = {
   type: 'object',
@@ -26,12 +27,17 @@ const schema: JSONSchema<AppSettings> = {
         maximized: { type: 'boolean' }
       },
       required: []
+    },
+    fetchCache: {
+      type: 'object'
     }
   },
-  required: ['APIKey', 'instanceLocation']
+  required: []
 }
 
 const store = new Conf({ schema })
+
+console.log(store.fileName)
 
 store.registerRendererListener()
 
@@ -133,7 +139,7 @@ app.whenReady().then(() => {
     throw new Error('No Instance Defined')
   })
 
-  ipcMain.on('update-modpack', (evt, data: UpdateModpackData) => {
+  ipcMain.handle('update-modpack', async (evt, data: UpdateModpackData) => {
     const { overrides, overridesTotal, newAddons, changedAddons, disabledAddons, removedAddons } =
       data
     const totalItems =
@@ -143,7 +149,65 @@ app.whenReady().then(() => {
       disabledAddons.length +
       removedAddons.length
 
-    // writeFile
+    return
+
+    let idx = 0
+    for await (const newAddon of newAddons) {
+      if (typeof newAddon.downloadUrl !== 'undefined') {
+        const downloader = await downloadFile({
+          url: newAddon.downloadUrl!,
+          directory: join(store.get('instanceLocation'), '/mods/'), // or 'savePath' for full path
+          cliProgress: false, // Show progress bar in the CLI (default: false)
+          parallelStreams: 1 // Number of parallel connections (default: 3)
+        })
+        await downloader.download()
+        evt.sender.send('update-modpack-progress', (idx++ / totalItems) * 100)
+      }
+    }
+
+    for await (const changedAddon of changedAddons) {
+      if (
+        typeof changedAddon.downloadUrl !== 'undefined' &&
+        typeof changedAddon.oldFilename !== 'undefined'
+      ) {
+        await unlink(join(store.get('instanceLocation'), 'mods', changedAddon.oldFilename!))
+        const downloader = await downloadFile({
+          url: changedAddon.downloadUrl!,
+          directory: join(store.get('instanceLocation'), 'mods'), // or 'savePath' for full path
+          fileName: changedAddon.filename,
+          cliProgress: false, // Show progress bar in the CLI (default: false)
+          parallelStreams: 1 // Number of parallel connections (default: 3)
+        })
+        await downloader.download()
+        evt.sender.send('update-modpack-progress', (idx++ / totalItems) * 100)
+      }
+    }
+
+    for await (const disabledAddon of disabledAddons) {
+      await rename(
+        join(store.get('instanceLocation'), 'mods', disabledAddon.filename),
+        join(store.get('instanceLocation'), 'mods', disabledAddon.filename + '.disabled')
+      )
+      evt.sender.send('update-modpack-progress', (idx++ / totalItems) * 100)
+    }
+
+    for await (const removedAddon of removedAddons) {
+      await unlink(join(store.get('instanceLocation'), 'mods', removedAddon.filename))
+      evt.sender.send('update-modpack-progress', (idx++ / totalItems) * 100)
+    }
+
+    for await (const override of overrides) {
+      const successful = await writeFile(
+        join(store.get('instanceLocation'), override.key.replace(/^overrides\//i, '')),
+        override.content,
+        {
+          appendNewline: false
+        }
+      )
+      if (successful) {
+        evt.sender.send('update-modpack-progress', (idx++ / totalItems) * 100)
+      }
+    }
   })
 
   app.on('activate', function () {

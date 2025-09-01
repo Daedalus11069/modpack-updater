@@ -13,6 +13,7 @@ export interface AppSettings {
   APIKey: string
   instanceLocation: string
   position: PositionSetting
+  fetchCache: Record<string, any>
 }
 
 export interface UpdateFile {
@@ -34,12 +35,13 @@ export interface TreeNodeEntry extends TreeNode {
 }
 
 export type FlattenedEntry = Entry & {
+  key: string
   content?: string
   isFile: boolean
 }
 
 export interface UpdateModpackData {
-  overrides: Entry[]
+  overrides: FlattenedEntry[]
   overridesTotal: number
   newAddons: UpdateFile[]
   changedAddons: UpdateFile[]

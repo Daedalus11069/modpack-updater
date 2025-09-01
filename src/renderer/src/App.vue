@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, useTemplateRef, watch } from 'vue'
+import { computed, onMounted, reactive, ref, toRaw, useTemplateRef, watch } from 'vue'
 import { promiseTimeout, useElementSize, useFileDialog, useWindowSize } from '@vueuse/core'
 import { Conf } from 'electron-conf/renderer'
 import { BlobReader, Entry, TextWriter, ZipReader } from '@zip.js/zip.js'
@@ -210,23 +210,17 @@ const countFiles = (nodes: Entry[]) => {
       count++
     }
   }
-  // if (typeof node.children !== 'undefined' && node.children !== null) {
-  //   for (const treeNode of node.children) {
-  //     if (treeNode.children !== null) {
-  //       count = countTreeLeafs(treeNode, count)
-  //     } else if (treeNode.isFile) {
-  //       count++
-  //     }
-  //   }
-  // }
-  // if (node.isFile) {
-  //   count++
-  // }
   return count
 }
 
+const prepareAddonsForSend = (addons: UpdateFile[]) => {
+  for (const addon of addons) {
+    delete addon.changelog
+  }
+  return addons
+}
+
 const updateModpack = async () => {
-  console.log(modpackPaths.value, modpackTree.value, modpackUpdate.value)
   const overridesIdx = modpackTree.value.findIndex((node) => node.key === 'overrides')
   if (
     overridesIdx >= 0 &&
@@ -237,14 +231,23 @@ const updateModpack = async () => {
       modpackPaths.value.filter((node) => /^overrides\//.test(node.filename))
     )
     const overrides = await getTreeContent(modpackTree.value[overridesIdx])
-    const overridesFlattened = flattenTree(overrides).filter((node) => node.isFile)
-    console.log({ overridesTotal, overridesFlattened })
-    // buttonsDisabled.value = true
-    // window.electron.ipcRenderer.send('update-modpack', {
-    //   overrides,
+    const overridesFlattened = flattenTree(overrides)
+      .filter((node) => node.isFile)
+      .map((node) => ({
+        content: node.content,
+        key: node.filename
+      }))
+    progress.value = 0
+    buttonsDisabled.value = true
+    // await window.electron.ipcRenderer.invoke('update-modpack', {
+    //   overrides: overridesFlattened,
     //   overridesTotal,
-    //   ...modpackUpdate.value
+    //   newAddons: prepareAddonsForSend(toRaw(modpackUpdate.value.newAddons)),
+    //   changedAddons: prepareAddonsForSend(toRaw(modpackUpdate.value.changedAddons)),
+    //   disabledAddons: prepareAddonsForSend(toRaw(modpackUpdate.value.disabledAddons)),
+    //   removedAddons: prepareAddonsForSend(toRaw(modpackUpdate.value.removedAddons))
     // })
+    buttonsDisabled.value = false
   }
 }
 
@@ -255,37 +258,46 @@ async function manifestFileGetter(files: ManifestFile[] = [], signal: AbortSigna
     return fileID
   })
   const fetchedFiles = (
-    (await api.value!.getFiles(fileIDs, signal)) as unknown as ManifestFile[]
+    (await api.value!.getFiles(fileIDs, signal)) as unknown as (ManifestFile & {
+      filename: string
+    })[]
   ).map((addon) => {
     const { id, modId, fileName } = addon as unknown as File
     addon.projectID = modId
     addon.fileID = id
-    // @ts-expect-error
     addon.filename = fileName
     addon.required = requiredMap[`${id}`]
     return addon
   })
   const modIDs = fetchedFiles.map(({ projectID }) => projectID)
   const mods = await api.value!.getMods(modIDs, signal)
-  const updateFiles: UpdateFile[] = fetchedFiles.map((addon) => {
+  const updateFiles: UpdateFile[] = []
+  for await (const addon of fetchedFiles) {
     const nameIdx = mods.findIndex((mod) => mod.id === addon.projectID)
     let name = ''
     if (nameIdx >= 0) {
       name = mods[nameIdx].name
     }
-    return {
+    let downloadUrl = (addon as unknown as File).downloadUrl
+    if (downloadUrl === null || typeof downloadUrl === 'undefined') {
+      const splitFileIdMatch = `${addon.fileID}`.match(/^(?<part1>\d{4})(?<part2>\d{3})$/)
+      if (splitFileIdMatch !== null) {
+        let { part1, part2 } = splitFileIdMatch.groups!
+        if (/^0/.test(part2)) {
+          part2 = part2.replace(/^0/, '')
+        }
+        downloadUrl = `https://edge.forgecdn.net/files/${part1}/${part2}/${addon.filename}`
+      }
+    }
+    updateFiles.push({
       name,
       addonID: addon.projectID,
       fileID: addon.fileID,
-      // @ts-expect-error
       filename: addon.filename,
-      downloadUrl: `${(addon as unknown as File).downloadUrl}`.replace(
-        /^https:\/\/edge\./,
-        'https://mediafiles.'
-      ),
+      downloadUrl: `${downloadUrl}`.replace(/^https:\/\/edge\./, 'https://mediafilez.'),
       required: addon.required
-    }
-  })
+    })
+  }
   return updateFiles
 }
 
@@ -446,7 +458,12 @@ watch(api, async () => {
 })
 
 onMounted(async () => {
-  api.value = new CurseforgeV1Client(await conf.get('APIKey'))
+  api.value = new CurseforgeV1Client(await conf.get('APIKey'), {
+    // fetch: nodeFetch as unknown as typeof fetch
+  })
+  window.electron.ipcRenderer.on('update-modpack-progress', (_evt, progressPercent: number) => {
+    progress.value = progressPercent
+  })
 })
 </script>
 
