@@ -37,8 +37,6 @@ const schema: JSONSchema<AppSettings> = {
 
 const store = new Conf({ schema })
 
-console.log(store.fileName)
-
 store.registerRendererListener()
 
 function createWindow(): BrowserWindow {
@@ -149,14 +147,12 @@ app.whenReady().then(() => {
       disabledAddons.length +
       removedAddons.length
 
-    return
-
     let idx = 0
     for await (const newAddon of newAddons) {
       if (typeof newAddon.downloadUrl !== 'undefined') {
         const downloader = await downloadFile({
           url: newAddon.downloadUrl!,
-          directory: join(store.get('instanceLocation'), '/mods/'), // or 'savePath' for full path
+          directory: join(store.get('instanceLocation'), 'mods'), // or 'savePath' for full path
           cliProgress: false, // Show progress bar in the CLI (default: false)
           parallelStreams: 1 // Number of parallel connections (default: 3)
         })

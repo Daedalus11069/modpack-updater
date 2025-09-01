@@ -54,7 +54,7 @@ const navArea = useTemplateRef('navArea')
 const configArea = useTemplateRef('configArea')
 const bottomArea = useTemplateRef('bottomArea')
 const bottomAreaContainer = useTemplateRef('bottomAreaContainer')
-const changelogsHeader = useTemplateRef('changelogsHeader')
+const changesHeader = useTemplateRef('changesHeader')
 
 const windowSize = useWindowSize({
   type: 'visual'
@@ -73,7 +73,7 @@ const configAreaSize = useElementSize(
     box: 'border-box'
   }
 )
-const changelogsHeaderSize = useElementSize(changelogsHeader)
+const changesHeaderSize = useElementSize(changesHeader)
 
 const bottomAreaheight = computed(() => {
   const size =
@@ -83,7 +83,7 @@ const bottomAreaheight = computed(() => {
     configAreaSize.height.value -
     parseFloat(getComputedStyle(bottomArea.value!).marginTop.replace('px', '')) -
     parseFloat(getComputedStyle(bottomAreaContainer.value!).marginTop.replace('px', '')) -
-    changelogsHeaderSize.height.value
+    changesHeaderSize.height.value
   return size + 'px'
 })
 
@@ -239,14 +239,14 @@ const updateModpack = async () => {
       }))
     progress.value = 0
     buttonsDisabled.value = true
-    // await window.electron.ipcRenderer.invoke('update-modpack', {
-    //   overrides: overridesFlattened,
-    //   overridesTotal,
-    //   newAddons: prepareAddonsForSend(toRaw(modpackUpdate.value.newAddons)),
-    //   changedAddons: prepareAddonsForSend(toRaw(modpackUpdate.value.changedAddons)),
-    //   disabledAddons: prepareAddonsForSend(toRaw(modpackUpdate.value.disabledAddons)),
-    //   removedAddons: prepareAddonsForSend(toRaw(modpackUpdate.value.removedAddons))
-    // })
+    await window.electron.ipcRenderer.invoke('update-modpack', {
+      overrides: overridesFlattened,
+      overridesTotal,
+      newAddons: prepareAddonsForSend(toRaw(modpackUpdate.value.newAddons)),
+      changedAddons: prepareAddonsForSend(toRaw(modpackUpdate.value.changedAddons)),
+      disabledAddons: prepareAddonsForSend(toRaw(modpackUpdate.value.disabledAddons)),
+      removedAddons: prepareAddonsForSend(toRaw(modpackUpdate.value.removedAddons))
+    })
     buttonsDisabled.value = false
   }
 }
@@ -514,14 +514,42 @@ onMounted(async () => {
             <Tree :value="modpackTree" :class="`w-full overflow-y-auto`"></Tree>
           </div>
           <div id="mod-update-area" class="basis-4/12 h-full">
-            <h3 ref="changelogsHeader">Changelogs:</h3>
+            <h3 ref="changesHeader">Changes:</h3>
             <div :class="`basis-1/2 h-full overflow-y-auto`">
               <Accordion>
-                <AccordionPanel :value="addon.addonID" v-for="addon in modpackUpdate.changedAddons">
-                  <AccordionHeader>{{ addon.name }}</AccordionHeader>
+                <AccordionPanel
+                  :value="addon.addonID"
+                  :style="`--p-accordion-header-color: var(--p-green-500);`"
+                  class="added-mod"
+                  v-for="addon in modpackUpdate.newAddons"
+                >
+                  <AccordionHeader>{{ addon.name }} (added)</AccordionHeader>
+                </AccordionPanel>
+                <AccordionPanel
+                  :value="addon.addonID"
+                  :style="`--p-accordion-header-color: var(--p-orange-500)`"
+                  v-for="addon in modpackUpdate.changedAddons"
+                >
+                  <AccordionHeader>{{ addon.name }} (changed)</AccordionHeader>
                   <AccordionContent>
                     <p class="m-0 prose dark:prose-invert" v-html="addon.changelog"></p>
                   </AccordionContent>
+                </AccordionPanel>
+                <AccordionPanel
+                  :value="addon.addonID"
+                  :style="`--p-accordion-header-color: var(--p-purple-500)`"
+                  class="disabled-mod"
+                  v-for="addon in modpackUpdate.disabledAddons"
+                >
+                  <AccordionHeader>{{ addon.name }} (disabled)</AccordionHeader>
+                </AccordionPanel>
+                <AccordionPanel
+                  :value="addon.addonID"
+                  :style="`--p-accordion-header-color: var(--p-red-500)`"
+                  class="removed-mod"
+                  v-for="addon in modpackUpdate.removedAddons"
+                >
+                  <AccordionHeader>{{ addon.name }} (removed)</AccordionHeader>
                 </AccordionPanel>
               </Accordion>
             </div>
@@ -550,5 +578,15 @@ onMounted(async () => {
 }
 .prose h1 {
   font-size: 1.25em;
+}
+</style>
+
+<style lang="scss">
+#mod-update-area .added-mod,
+.disabled-mod,
+.removed-mod {
+  .p-accordionheader-toggle-icon {
+    display: none;
+  }
 }
 </style>
