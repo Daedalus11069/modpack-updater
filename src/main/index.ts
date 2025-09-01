@@ -186,10 +186,14 @@ app.whenReady().then(() => {
       }
 
       for await (const disabledAddon of disabledAddons) {
-        await rename(
-          join(instanceLocation, 'mods', disabledAddon.filename),
-          join(instanceLocation, 'mods', disabledAddon.filename + '.disabled')
-        )
+        try {
+          await rename(
+            join(instanceLocation, 'mods', disabledAddon.filename),
+            join(instanceLocation, 'mods', disabledAddon.filename + '.disabled')
+          )
+        } catch (e) {
+          console.log(e)
+        }
         evt.sender.send('update-modpack-progress', (idx++ / totalItems) * 100)
       }
 
