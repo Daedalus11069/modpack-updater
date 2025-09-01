@@ -204,15 +204,24 @@ app.whenReady().then(() => {
 
       for await (const override of overrides) {
         try {
-          const successful = await writeFile(
-            join(instanceLocation, override.key.replace(/^overrides\//i, '')),
-            override.content,
-            {
-              appendNewline: false
+          if (typeof override.content !== 'undefined') {
+            let content: string | Buffer = override.content
+            if (
+              override.key.slice((Math.max(0, override.key.lastIndexOf('.')) || Infinity) + 1) !==
+              ''
+            ) {
+              content = Buffer.from(content.replace(/^data:(.*?);base64,/, ''), 'base64')
             }
-          )
-          if (successful) {
-            evt.sender.send('update-modpack-progress', (idx++ / totalItems) * 100)
+            const successful = await writeFile(
+              join(instanceLocation, override.key.replace(/^overrides\//i, '')),
+              content,
+              {
+                appendNewline: false
+              }
+            )
+            if (successful) {
+              evt.sender.send('update-modpack-progress', (idx++ / totalItems) * 100)
+            }
           }
         } catch (e) {
           console.log(e)

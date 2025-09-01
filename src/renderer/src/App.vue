@@ -2,7 +2,8 @@
 import { computed, onMounted, reactive, ref, toRaw, useTemplateRef, watch } from 'vue'
 import { promiseTimeout, useElementSize, useFileDialog, useWindowSize } from '@vueuse/core'
 import { Conf } from 'electron-conf/renderer'
-import { BlobReader, Entry, TextWriter, ZipReader } from '@zip.js/zip.js'
+import { BlobReader, Data64URIWriter, Entry, TextWriter, ZipReader } from '@zip.js/zip.js'
+import mime from 'mime'
 import { FwbButton, FwbNavbar, FwbNavbarCollapse, FwbSpinner } from 'flowbite-vue'
 import { CurseforgeV1Client, File } from '@xmcl/curseforge'
 import Tree from 'primevue/tree'
@@ -189,7 +190,14 @@ const getTreeContent = async (node: TreeNodeEntry) => {
         typeof treeNode.entry !== 'undefined' &&
         typeof treeNode.entry.getData !== 'undefined'
       ) {
-        treeNode.content = await treeNode.entry.getData(new TextWriter())
+        if (
+          treeNode.key.slice((Math.max(0, treeNode.key.lastIndexOf('.')) || Infinity) + 1) !== ''
+        ) {
+          const mimetype = mime.getType(treeNode.key)
+          treeNode.content = await treeNode.entry.getData(new Data64URIWriter(mimetype))
+        } else {
+          treeNode.content = await treeNode.entry.getData(new TextWriter())
+        }
       }
     }
   }
