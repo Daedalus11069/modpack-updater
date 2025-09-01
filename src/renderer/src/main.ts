@@ -1,5 +1,6 @@
 import { createApp } from 'vue'
 import PrimeVue from 'primevue/config'
+// @ts-ignore
 import Aura from '@primeuix/themes/aura'
 import App from './App.vue'
 import './assets/style.css'

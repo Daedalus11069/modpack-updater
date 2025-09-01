@@ -1,13 +1,9 @@
 <script setup lang="ts">
-import { useIpcRenderer } from '@vueuse/electron'
-import { IpcRenderer } from 'electron'
 import { Conf } from 'electron-conf/renderer'
 import { FwbButton, FwbInput } from 'flowbite-vue'
 
 import type { AppSettings } from 'src/shared/types'
 import { onMounted, ref, watch } from 'vue'
-
-const ipc = useIpcRenderer(window.electron.ipcRenderer as unknown as IpcRenderer)
 
 const conf = new Conf<AppSettings>()
 const instanceLocation = ref('')

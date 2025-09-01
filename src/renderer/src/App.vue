@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, toRaw, useTemplateRef, watch } from 'vue'
+import { computed, onMounted, ref, toRaw, useTemplateRef, watch } from 'vue'
 import { promiseTimeout, useElementSize, useFileDialog, useWindowSize } from '@vueuse/core'
 import { Conf } from 'electron-conf/renderer'
 import { BlobReader, Data64URIWriter, Entry, TextWriter, ZipReader } from '@zip.js/zip.js'
@@ -88,14 +88,14 @@ const bottomAreaheight = computed(() => {
   return size + 'px'
 })
 
-const updateDataState = reactive({
-  loading: {
-    started: false,
-    running: false,
-    finished: false,
-    canceled: false
-  }
-})
+// const updateDataState = reactive({
+//   loading: {
+//     started: false,
+//     running: false,
+//     finished: false,
+//     canceled: false
+//   }
+// })
 
 const buttonsDisabled = ref<boolean>(true)
 
@@ -193,7 +193,7 @@ const getTreeContent = async (node: TreeNodeEntry) => {
         if (
           treeNode.key.slice((Math.max(0, treeNode.key.lastIndexOf('.')) || Infinity) + 1) !== ''
         ) {
-          const mimetype = mime.getType(treeNode.key)
+          const mimetype = mime.getType(treeNode.key) ?? 'text/plain'
           treeNode.content = await treeNode.entry.getData(new Data64URIWriter(mimetype))
         } else {
           treeNode.content = await treeNode.entry.getData(new TextWriter())
@@ -404,37 +404,37 @@ const processModpackChanges = async () => {
   }
 }
 
-const dataLoadingBtnDisabled = computed<boolean>(() => {
-  return !updateDataState.loading.started && !updateDataState.loading.finished
-})
+// const dataLoadingBtnDisabled = computed<boolean>(() => {
+//   return !updateDataState.loading.started && !updateDataState.loading.finished
+// })
 
-const dataLoadingState = computed<{ state: 'Cancel' | 'Resume'; color: 'red' | 'green' }>(() => {
-  if (updateDataState.loading.started && !updateDataState.loading.canceled) {
-    return { state: 'Cancel', color: 'red' }
-  } else if (!updateDataState.loading.started || updateDataState.loading.finished) {
-    return { state: 'Resume', color: 'green' }
-  }
-  return { state: 'Resume', color: 'green' }
-})
+// const dataLoadingState = computed<{ state: 'Cancel' | 'Resume'; color: 'red' | 'green' }>(() => {
+//   if (updateDataState.loading.started && !updateDataState.loading.canceled) {
+//     return { state: 'Cancel', color: 'red' }
+//   } else if (!updateDataState.loading.started || updateDataState.loading.finished) {
+//     return { state: 'Resume', color: 'green' }
+//   }
+//   return { state: 'Resume', color: 'green' }
+// })
 
-const controlLoading = () => {
-  if (!updateDataState.loading.canceled && updateDataState.loading.running) {
-    updateDataState.loading.canceled = true
-    updateDataState.loading.running = false
-    abortController.value.abort('Canceled')
-  } else if (
-    updateDataState.loading.started &&
-    updateDataState.loading.canceled &&
-    !updateDataState.loading.running
-  ) {
-    abortController.value = new AbortController()
-    updateDataState.loading.running = true
-    updateDataState.loading.canceled = false
-    // cacheUpdateData()
-  } else {
-    abortController.value = new AbortController()
-  }
-}
+// const controlLoading = () => {
+//   if (!updateDataState.loading.canceled && updateDataState.loading.running) {
+//     updateDataState.loading.canceled = true
+//     updateDataState.loading.running = false
+//     abortController.value.abort('Canceled')
+//   } else if (
+//     updateDataState.loading.started &&
+//     updateDataState.loading.canceled &&
+//     !updateDataState.loading.running
+//   ) {
+//     abortController.value = new AbortController()
+//     updateDataState.loading.running = true
+//     updateDataState.loading.canceled = false
+//     // cacheUpdateData()
+//   } else {
+//     abortController.value = new AbortController()
+//   }
+// }
 
 onChange(async (files) => {
   if (files !== null) {
