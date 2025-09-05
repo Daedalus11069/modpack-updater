@@ -36,6 +36,7 @@ const conf = new Conf<AppSettings>()
 const modpackFilename = ref<string>('')
 const modpackPaths = ref<Entry[]>([])
 const modpackTree = ref<TreeNodeEntry[]>([])
+const selectedModpackTree = ref<TreeNodeEntry[]>([])
 const progress = ref<number>(0)
 const progressText = ref<string>('')
 const api = ref<CurseforgeV1Client>()
@@ -241,6 +242,16 @@ const updateModpack = async () => {
     const overrides = await getTreeContent(modpackTree.value[overridesIdx])
     const overridesFlattened = flattenTree(overrides)
       .filter((node) => node.isFile)
+      .filter((node) => {
+        let selected = false
+        if (
+          typeof selectedModpackTree.value[node.key] !== 'undefined' &&
+          selectedModpackTree.value[node.key] !== null
+        ) {
+          selected = true
+        }
+        return selected
+      })
       .map((node) => ({
         content: node.content,
         key: node.key
@@ -479,9 +490,6 @@ onMounted(async () => {
   <div class="h-full flex flex-col">
     <fwb-navbar solid ref="navArea">
       <template #logo> Modpack Updater </template>
-      <template #default="{ isShowMenu }">
-        <fwb-navbar-collapse :is-show-menu="isShowMenu"> </fwb-navbar-collapse>
-      </template>
       <template #right-side>
         <theme-toggler />
       </template>
@@ -519,7 +527,12 @@ onMounted(async () => {
                 {{ dataLoadingState.state }} Load
               </fwb-button>
             </div> -->
-            <Tree :value="modpackTree" :class="`w-full overflow-y-auto`"></Tree>
+            <Tree
+              :value="modpackTree"
+              v-model:selectionKeys="selectedModpackTree"
+              selectionMode="checkbox"
+              :class="`w-full overflow-y-auto`"
+            ></Tree>
           </div>
           <div id="mod-update-area" class="basis-4/12 h-full">
             <h3 ref="changesHeader">Changes:</h3>
