@@ -4,7 +4,7 @@ import { promiseTimeout, useElementSize, useFileDialog, useWindowSize } from '@v
 import { Conf } from 'electron-conf/renderer'
 import { BlobReader, Data64URIWriter, Entry, TextWriter, ZipReader } from '@zip.js/zip.js'
 import mime from 'mime'
-import { FwbButton, FwbNavbar, FwbNavbarCollapse, FwbSpinner } from 'flowbite-vue'
+import { FwbButton, FwbNavbar, FwbSpinner } from 'flowbite-vue'
 import { CurseforgeV1Client, File } from '@xmcl/curseforge'
 import Tree from 'primevue/tree'
 import ProgressBar from 'primevue/progressbar'
@@ -36,7 +36,7 @@ const conf = new Conf<AppSettings>()
 const modpackFilename = ref<string>('')
 const modpackPaths = ref<Entry[]>([])
 const modpackTree = ref<TreeNodeEntry[]>([])
-const selectedModpackTree = ref<TreeNodeEntry[]>([])
+const selectedModpackTree = ref<Record<string, any>>([])
 const progress = ref<number>(0)
 const progressText = ref<string>('')
 const api = ref<CurseforgeV1Client>()
